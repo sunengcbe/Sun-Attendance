@@ -1,0 +1,13 @@
+# Passwords and private URLs
+config.py
+
+# Staff names
+employee.json
+
+# Data written by the ESP32
+status.json
+attendance_backup.jsonl
+offline.txt
+
+# Editor settings
+.mpyproject.json
