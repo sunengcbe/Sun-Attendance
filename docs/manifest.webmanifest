@@ -3,7 +3,7 @@
   "short_name": "Attendance",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#16181d",
-  "theme_color": "#16181d",
+  "background_color": "#0f2a2e",
+  "theme_color": "#0f2a2e",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }

@@ -107,6 +107,10 @@ function lastSeenText() {
   return `Machine offline, last seen ${Math.round(mins / 1440)} days ago`;
 }
 
+const SUN_ICON = '<svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.500" fill="currentColor"/><path d="M12 2v2.500M12 19.500V22M2 12h2.500M19.500 12H22M4.900 4.900l1.800 1.800M17.300 17.300l1.800 1.800M4.900 19.100l1.800-1.800M17.300 6.700l1.800-1.800"/></svg>';
+
+const avatar = (name) => `<span class="avatar" aria-hidden="true">${esc(name.trim().charAt(0).toUpperCase())}</span>`;
+
 const machineStatus = () => `<span class="status"><span class="dot ${machineOnline() ? 'on' : ''}"></span>${esc(lastSeenText())}</span>`;
 
 // --- Components ---
@@ -122,13 +126,13 @@ function slotHtml(day, slot) {
   if (slot.early) note = `<span class="note ${slot.colour ? 'early' : ''}">${slot.early} min early</span>`;
   if (slot.index === 3 && day.overtime) note = `<span class="note">+${formatDuration(day.overtime)}</span>`;
   const scanLabel = slot.scan ? formatMinutes(slot.minutes) : 'no scan';
-  return `<button class="slot" data-action="edit-slot" data-employee="${day.employee.id}" data-date="${day.date}" data-slot="${slot.index}"
+  return `<button class="slot ${slot.colour || ''} ${slot.missing ? 'missing' : ''}" data-action="edit-slot" data-employee="${day.employee.id}" data-date="${day.date}" data-slot="${slot.index}"
     aria-label="${esc(day.employee.name)}, ${slot.name}, ${scanLabel}. Edit"><small>${slot.name}</small>${time}${note}</button>`;
 }
 
 function dayHtml(day, showName) {
   const title = showName
-    ? `<a href="#/employee/${day.employee.id}">${esc(day.employee.name)}</a><span class="sub">${prettyDate(day.date)}</span>`
+    ? `<a class="who" href="#/employee/${day.employee.id}">${avatar(day.employee.name)}${esc(day.employee.name)}</a><span class="sub">${prettyDate(day.date)}</span>`
     : `<span><b>${prettyDate(day.date)}</b></span><span class="sub">${day.worked ? formatDuration(day.worked) + ' worked' : ''}</span>`;
 
   if (!day.hasScans) {
@@ -179,10 +183,10 @@ function viewToday() {
   return `<div class="head"><div><h1>Today</h1><div class="sub">${prettyDate(today, true)}</div></div>${machineStatus()}</div>
     ${reminderHtml()}
     <div class="stats">
-      <a class="stat" href="#/attendance" data-filter="all"><b>${present}</b><span>In now</span></a>
-      <a class="stat" href="#/attendance" data-filter="late"><b>${late.length}</b><span>Late</span></a>
-      <a class="stat" href="#/attendance" data-filter="early"><b>${early.length}</b><span>Early</span></a>
-      <a class="stat" href="#/attendance" data-filter="missing"><b>${missing.length}</b><span>Missing</span></a>
+      <a class="stat in" href="#/attendance" data-filter="all"><b>${present}</b><span>In now</span></a>
+      <a class="stat late" href="#/attendance" data-filter="late"><b>${late.length}</b><span>Late</span></a>
+      <a class="stat early" href="#/attendance" data-filter="early"><b>${early.length}</b><span>Early</span></a>
+      <a class="stat missing" href="#/attendance" data-filter="missing"><b>${missing.length}</b><span>Missing</span></a>
     </div>
     ${exceptions.length ? `<h2>Needs attention</h2>${exceptions.map(d => dayHtml(d, true)).join('')}` : ''}
     ${normal.length ? `<h2 style="margin-top:16px">Everyone else</h2>${normal.map(d => dayHtml(d, true)).join('')}` : ''}
@@ -341,8 +345,8 @@ function viewStaff() {
     <section class="card">
       ${staff.map(e => {
         const s = shiftFor(employeeShifts(e.id), now().date);
-        return `<a class="list-row" href="#/employee/${e.id}"><span><b>${esc(e.name)}</b><br>
-          <span class="sub">${shortTime(s.morning_start)}–${shortTime(s.morning_end)}, ${shortTime(s.evening_start)}–${shortTime(s.evening_end)}</span></span><span class="sub">›</span></a>`;
+        return `<a class="list-row" href="#/employee/${e.id}"><span class="who">${avatar(e.name)}<span><b>${esc(e.name)}</b><br>
+          <span class="sub">${shortTime(s.morning_start)}–${shortTime(s.morning_end)}, ${shortTime(s.evening_start)}–${shortTime(s.evening_end)}</span></span></span><span class="sub">›</span></a>`;
       }).join('') || '<p class="empty">No staff yet.</p>'}
     </section>
     ${incomplete.length ? `<section class="card"><h2>Registration not finished</h2>
@@ -445,21 +449,22 @@ function render() {
   const view = screens[page] || viewToday;
   const activeTab = page === 'employee' || page === 'add' ? 'staff' : page;
   app.innerHTML = `${api.demo ? '<div class="demo-note">Demo with made-up data. Nothing is saved.</div>' : ''}
+    <div class="topbar">${SUN_ICON}Sun Attendance</div>
     <div class="shell"><nav class="nav" aria-label="Main">
-      <div class="nav-brand">Sun Attendance</div>
+      <div class="nav-brand">${SUN_ICON}Sun Attendance</div>
       ${NAV.map(([key, label, icon]) => `<a href="#/${key}" ${activeTab === key ? 'aria-current="page"' : ''}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg>${label}</a>`).join('')}
     </nav><main>${view()}</main></div>`;
 }
 
 function viewLogin(message = '') {
-  app.innerHTML = `<div class="login"><h1>Sun Attendance</h1><p class="sub">Sign in to continue.</p>
+  app.innerHTML = `<div class="login-page"><div class="login">${SUN_ICON}<h1>Sun Attendance</h1><p class="sub">Sign in to continue.</p>
     <form id="login-form">
       <label>Email<input type="email" name="email" autocomplete="username" required></label>
       <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
       <p class="error" id="login-error">${esc(message)}</p>
       <button class="btn primary" type="submit" style="width:100%">Sign in</button>
-    </form></div>`;
+    </form></div></div>`;
 }
 
 // --- Editing a scan ---

@@ -21,6 +21,7 @@ wlan = network.WLAN(network.STA_IF)
 file_lock = _thread.allocate_lock()
 
 RESULT_DISPLAY_MS = 700
+LED_ON_MS = 2000
 POLL_INTERVAL_S = 15
 WIFI_RETRY_S = 60
 DOUBLE_SCAN_MS = 120000
@@ -261,7 +262,6 @@ def run_command(command):
     except Exception as e:
         print("❌ Job failed:", e)
     worker_paused = False
-    display.show_ready()
 
 # ==========================================
 # 1. SYSTEM INITIALIZATION & NTP SYNC
@@ -290,14 +290,11 @@ _thread.start_new_thread(worker, ())
 # ==========================================
 # 2. THE INFINITE RUNTIME LOOP
 # ==========================================
-display.show_ready()
 print("=== System Ready. Waiting for scans... ===")
 
-last_activity_ms = time.ticks_ms()
-last_clock_update_ms = time.ticks_ms()
 last_scan_ms = {}
 clock_message_shown = False
-STANDBY_DELAY = 15000
+idle_text = None
 
 while True:
 
@@ -311,10 +308,10 @@ while True:
         continue
     if clock_message_shown:
         clock_message_shown = False
-        display.show_ready()
+        idle_text = None
 
     # -- Midnight Rollover Check --
-    _, today_date, _ = get_datetime()
+    lcd_time, today_date, _ = get_datetime()
     if today_date != current_date:
         if EMP_STATUS.get("_date") != today_date:
             print(f"🌙 New day! Wiping states for {today_date}.")
@@ -327,14 +324,20 @@ while True:
         command = pending_command
         run_command(command)
         pending_command = None
-        last_activity_ms = time.ticks_ms()
+        idle_text = None
         continue
+
+    # Date and time on the top line, always, while waiting for a finger
+    text = f"{today_date[:6]}  {lcd_time}"
+    if text != idle_text:
+        show_centered(text, 0)
+        show_centered("Scan Finger...", 1)
+        idle_text = text
 
     result = scan_finger()
     now_ms = time.ticks_ms()
 
     if result is not None:
-        last_activity_ms = time.ticks_ms()
         lcd_time, safe_date, safe_time = get_datetime()
         emp_name = USERS.get(str(result)) if result > 0 else None
 
@@ -362,31 +365,24 @@ while True:
 
             print(f"✅ ACCESS GRANTED! {emp_name} -> {new_status}")
             display.show_log(emp_name, lcd_time, new_status)
-            alerts.success_beep()
 
+            # Green for IN, red for OUT, on as soon as the scan registers
             if new_status == "IN" and alerts.green_led:
                 alerts.green_led.value(1)
             elif new_status == "OUT" and alerts.red_led:
                 alerts.red_led.value(1)
 
+            alerts.success_beep()
             backup_log(result, time.time() + EPOCH_OFFSET)
 
-            time.sleep_ms(RESULT_DISPLAY_MS)
+            time.sleep_ms(LED_ON_MS)
 
             if alerts.green_led: alerts.green_led.value(0)
             if alerts.red_led: alerts.red_led.value(0)
 
             gc.collect()
 
-        display.show_ready()
+        idle_text = None
         print("\nWaiting for next scan...")
-
-    else:
-        if time.ticks_diff(now_ms, last_activity_ms) > STANDBY_DELAY:
-            if time.ticks_diff(now_ms, last_clock_update_ms) > 1000:
-                lcd_time, safe_date, _ = get_datetime()
-                show_centered(lcd_time, 0)
-                show_centered(safe_date, 1)
-                last_clock_update_ms = now_ms
 
     time.sleep(0.02)
