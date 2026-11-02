@@ -7,8 +7,10 @@
 WIFI_SSID = "YOUR_WIFI_NAME"
 WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 
-# Google Apps Script URL
-GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+# Supabase (filled in during setup)
+SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
+SUPABASE_KEY = "YOUR_PUBLIC_KEY"
+DEVICE_SECRET = "YOUR_MACHINE_SECRET"
 
 # -----------------------------
 # LCD

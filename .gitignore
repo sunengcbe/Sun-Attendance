@@ -1,13 +1,16 @@
 # Passwords and private URLs
 config.py
 
-# Staff names
+# Staff names, device data and the private setup file
+private/
 employee.json
-
-# Data written by the ESP32
 status.json
 attendance_backup.jsonl
 offline.txt
 
-# Editor settings
+# Editor and session files
 .mpyproject.json
+.claude/
+.brainstorm-state
+brainstorm-*
+__pycache__/
