@@ -135,7 +135,7 @@ function addCellHtml(day) {
     aria-label="Add a scan for ${esc(day.employee.name)}"><small>Add</small><span class="t none">+</span></button>`;
 }
 
-function dayHtml(day, showName) {
+function dayHtml(day, showName, canAdd = true) {
   const title = showName
     ? `<a class="who" href="#/employee/${day.employee.id}">${avatar(day.employee.name)}${esc(day.employee.name)}</a><span class="sub">${prettyDate(day.date)}</span>`
     : `<span><b>${prettyDate(day.date)}</b></span><span class="sub">${day.worked ? formatDuration(day.worked) + ' worked' : ''}</span>`;
@@ -143,13 +143,13 @@ function dayHtml(day, showName) {
   if (!day.hasScans) {
     return `<article class="day" id="day-${day.date}"><div class="day-top">${title}</div>
       <div class="no-scans">${day.notArrived ? 'Not arrived yet' : (day.date === now().date ? 'No scans yet' : 'No scans')}
-      <button class="btn small" data-action="edit-scan" data-employee="${day.employee.id}" data-date="${day.date}" data-scan="" data-minutes="${toMinutes(day.shift.morning_start)}">Add scan</button></div></article>`;
+      ${canAdd ? `<button class="btn small" data-action="edit-scan" data-employee="${day.employee.id}" data-date="${day.date}" data-scan="" data-minutes="${toMinutes(day.shift.morning_start)}">Add scan</button>` : ''}</div></article>`;
   }
 
   const foot = showName && day.worked ? `<div class="day-foot"><span>${formatDuration(day.worked)} worked</span></div>` : '';
   const open = day.cells[day.cells.length - 1].scan === null;
   return `<article class="day" id="day-${day.date}"><div class="day-top">${title}</div>
-    <div class="slots">${day.cells.map(c => cellHtml(day, c)).join('')}${open ? '' : addCellHtml(day)}</div>
+    <div class="slots">${day.cells.map(c => cellHtml(day, c)).join('')}${open || !canAdd ? '' : addCellHtml(day)}</div>
     ${foot}</article>`;
 }
 
@@ -189,8 +189,8 @@ function viewToday() {
       <a class="stat early" href="#/attendance" data-filter="early"><b>${early.length}</b><span>Early</span></a>
       <a class="stat missing" href="#/attendance" data-filter="missing"><b>${missing.length}</b><span>Missing</span></a>
     </div>
-    ${exceptions.length ? `<h2>Needs attention</h2>${exceptions.map(d => dayHtml(d, true)).join('')}` : ''}
-    ${normal.length ? `<h2 style="margin-top:16px">Everyone else</h2>${normal.map(d => dayHtml(d, true)).join('')}` : ''}
+    ${exceptions.length ? `<h2>Needs attention</h2>${exceptions.map(d => dayHtml(d, true, false)).join('')}` : ''}
+    ${normal.length ? `<h2 style="margin-top:16px">Everyone else</h2>${normal.map(d => dayHtml(d, true, false)).join('')}` : ''}
     ${days.length ? '' : '<p class="empty">No staff yet. Add someone from the Staff page.</p>'}`;
 }
 
