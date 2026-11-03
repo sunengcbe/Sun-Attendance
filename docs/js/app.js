@@ -1,7 +1,7 @@
 import { api as liveApi, isConfigured } from './api.js';
 import {
-  SLOT_NAMES, addDays, buildDay, clearingWindow, clearsOn, formatDuration, formatMinutes,
-  istDate, istMinutes, istToIso, monthTotals, shiftFor, toMinutes,
+  addDays, buildDay, clearingWindow, clearsOn, formatDuration, formatMinutes,
+  istDate, istMinutes, istToIso, monthTotals, ordinal, shiftFor, toMinutes,
 } from './rules.js';
 
 const demoMode = new URLSearchParams(location.search).has('demo');
@@ -114,20 +114,25 @@ const avatar = (name) => `<span class="avatar" aria-hidden="true">${esc(name.tri
 const machineStatus = () => `<span class="status"><span class="dot ${machineOnline() ? 'on' : ''}"></span>${esc(lastSeenText())}</span>`;
 
 // --- Components ---
-function slotHtml(day, slot) {
-  let time;
-  if (slot.scan) {
-    time = `<span class="t ${slot.colour || ''}">${formatMinutes(slot.minutes)}</span>`;
-  } else {
-    time = `<span class="t none">${slot.missing ? 'Missing' : '–'}</span>`;
-  }
+function cellHtml(day, cell) {
+  const time = cell.scan
+    ? `<span class="t ${cell.colour || ''}">${formatMinutes(cell.minutes)}</span>`
+    : `<span class="t none">${cell.missing ? 'Missing' : '–'}</span>`;
   let note = '';
-  if (slot.late) note = `<span class="note ${slot.colour ? 'late' : ''}">${slot.late} min late</span>`;
-  if (slot.early) note = `<span class="note ${slot.colour ? 'early' : ''}">${slot.early} min early</span>`;
-  if (slot.index === 3 && day.overtime) note = `<span class="note">+${formatDuration(day.overtime)}</span>`;
-  const scanLabel = slot.scan ? formatMinutes(slot.minutes) : 'no scan';
-  return `<button class="slot ${slot.colour || ''} ${slot.missing ? 'missing' : ''}" data-action="edit-slot" data-employee="${day.employee.id}" data-date="${day.date}" data-slot="${slot.index}"
-    aria-label="${esc(day.employee.name)}, ${slot.name}, ${scanLabel}. Edit"><small>${slot.name}</small>${time}${note}</button>`;
+  if (cell.late) note = `<span class="note late">${cell.late} min late</span>`;
+  if (cell.early) note = `<span class="note early">${cell.early} min early</span>`;
+  const isLast = cell === day.cells[day.cells.length - 1];
+  if (isLast && cell.scan && cell.kind === 'out' && day.overtime) note = `<span class="note">+${formatDuration(day.overtime)}</span>`;
+  const value = cell.scan ? cell.minutes : toMinutes(day.shift.evening_end);
+  const scanLabel = cell.scan ? formatMinutes(cell.minutes) : 'no scan';
+  return `<button class="slot ${cell.kind} ${cell.colour || ''} ${cell.missing ? 'missing' : ''}" data-action="edit-scan" data-employee="${day.employee.id}" data-date="${day.date}" data-scan="${cell.scan ? cell.scan.id : ''}" data-minutes="${value}"
+    aria-label="${esc(day.employee.name)}, ${cell.label}, ${scanLabel}. Edit"><small>${cell.label}</small>${time}${note}</button>`;
+}
+
+function addCellHtml(day) {
+  const value = day.date === now().date ? now().minutes : toMinutes(day.shift.evening_end);
+  return `<button class="slot add" data-action="edit-scan" data-employee="${day.employee.id}" data-date="${day.date}" data-scan="" data-minutes="${value}"
+    aria-label="Add a scan for ${esc(day.employee.name)}"><small>Add</small><span class="t none">+</span></button>`;
 }
 
 function dayHtml(day, showName) {
@@ -138,18 +143,14 @@ function dayHtml(day, showName) {
   if (!day.hasScans) {
     return `<article class="day" id="day-${day.date}"><div class="day-top">${title}</div>
       <div class="no-scans">${day.notArrived ? 'Not arrived yet' : (day.date === now().date ? 'No scans yet' : 'No scans')}
-      <button class="btn small" data-action="edit-slot" data-employee="${day.employee.id}" data-date="${day.date}" data-slot="0">Add scan</button></div></article>`;
+      <button class="btn small" data-action="edit-scan" data-employee="${day.employee.id}" data-date="${day.date}" data-scan="" data-minutes="${toMinutes(day.shift.morning_start)}">Add scan</button></div></article>`;
   }
 
-  const extras = day.extras.map(s => formatMinutes(istMinutes(s.scanned_at))).join(', ');
-  const foot = [
-    showName && day.worked ? `${formatDuration(day.worked)} worked` : '',
-    extras ? `Extra scan: ${extras}` : '',
-  ].filter(Boolean).map(t => `<span>${t}</span>`).join('');
-
+  const foot = showName && day.worked ? `<div class="day-foot"><span>${formatDuration(day.worked)} worked</span></div>` : '';
+  const open = day.cells[day.cells.length - 1].scan === null;
   return `<article class="day" id="day-${day.date}"><div class="day-top">${title}</div>
-    <div class="slots">${day.slots.map(s => slotHtml(day, s)).join('')}</div>
-    ${foot ? `<div class="day-foot">${foot}</div>` : ''}</article>`;
+    <div class="slots">${day.cells.map(c => cellHtml(day, c)).join('')}${open ? '' : addCellHtml(day)}</div>
+    ${foot}</article>`;
 }
 
 function reminderHtml() {
@@ -254,8 +255,8 @@ function calendarHtml(employee) {
     const d = days[date];
     const n = Number(date.slice(8));
     if (!d || !d.hasScans) { cells += `<span class="d">${n}</span>`; continue; }
-    const morningLate = d.slots[0].colour === 'late';
-    const eveningEarly = d.slots[3].colour === 'early';
+    const morningLate = d.lateTotal > 0;
+    const eveningEarly = d.earlyTotal > 0;
     cells += `<a href="#" data-action="goto-day" data-date="${date}">${n}<br>${morningLate ? '<i class="late"></i>' : ''}${eveningEarly ? '<i class="early"></i>' : ''}${d.hasMissing ? '<i class="miss"></i>' : ''}</a>`;
   }
 
@@ -271,10 +272,10 @@ function calendarHtml(employee) {
 
 function shiftForm(values, id) {
   return `<form id="${id}"><div class="grid2">
-      <label>Morning start<input type="time" name="morning_start" value="${values.morning_start.slice(0, 5)}" required></label>
-      <label>Morning end<input type="time" name="morning_end" value="${values.morning_end.slice(0, 5)}" required></label>
-      <label>Afternoon start<input type="time" name="evening_start" value="${values.evening_start.slice(0, 5)}" required></label>
-      <label>Evening end<input type="time" name="evening_end" value="${values.evening_end.slice(0, 5)}" required></label>
+      <label>Start time<input type="time" name="morning_start" value="${values.morning_start.slice(0, 5)}" required></label>
+      <label>Finish time<input type="time" name="evening_end" value="${values.evening_end.slice(0, 5)}" required></label>
+      <input type="hidden" name="morning_end" value="${values.morning_end.slice(0, 5)}">
+      <input type="hidden" name="evening_start" value="${values.evening_start.slice(0, 5)}">
       <label>Late buffer (min)<input type="number" name="late_buffer" min="0" max="120" value="${values.late_buffer}" required></label>
       <label>Early buffer (min)<input type="number" name="early_buffer" min="0" max="120" value="${values.early_buffer}" required></label>
     </div>`;
@@ -304,7 +305,7 @@ function viewEmployee(id) {
   const edits = data.edits.filter(e => e.employee_id === employee.id).slice(-8).reverse();
 
   return `<div class="head"><div><h1>${esc(employee.name)}</h1>
-      <div class="sub">${shortTime(current.morning_start)}–${shortTime(current.morning_end)}, ${shortTime(current.evening_start)}–${shortTime(current.evening_end)}</div></div>
+      <div class="sub">${shortTime(current.morning_start)} – ${shortTime(current.evening_end)}</div></div>
       <a class="btn small" href="#/staff">Back</a></div>
     <section class="card">${calendarHtml(employee)}</section>
     <section class="card"><div class="totals">
@@ -346,7 +347,7 @@ function viewStaff() {
       ${staff.map(e => {
         const s = shiftFor(employeeShifts(e.id), now().date);
         return `<a class="list-row" href="#/employee/${e.id}"><span class="who">${avatar(e.name)}<span><b>${esc(e.name)}</b><br>
-          <span class="sub">${shortTime(s.morning_start)}–${shortTime(s.morning_end)}, ${shortTime(s.evening_start)}–${shortTime(s.evening_end)}</span></span></span><span class="sub">›</span></a>`;
+          <span class="sub">${shortTime(s.morning_start)} – ${shortTime(s.evening_end)}</span></span></span><span class="sub">›</span></a>`;
       }).join('') || '<p class="empty">No staff yet.</p>'}
     </section>
     ${incomplete.length ? `<section class="card"><h2>Registration not finished</h2>
@@ -468,20 +469,15 @@ function viewLogin(message = '') {
 }
 
 // --- Editing a scan ---
-function openSlotEditor(employeeId, date, slotIndex) {
+function openScanEditor(employeeId, date, scanId, minutes) {
   const employee = data.employees.find(e => e.id === employeeId);
-  const scans = data.scans.filter(s => s.employee_id === employeeId && istDate(s.scanned_at) === date);
-  const day = buildDay(date, scans, employeeShifts(employeeId), now());
-  const slot = day.slots[slotIndex];
-  const scan = slot.scan;
-  const value = scan ? slot.minutes : slot.scheduled;
+  const scan = data.scans.find(s => s.id === scanId);
 
-  dialog.innerHTML = `<form id="slot-form" data-employee="${employeeId}" data-date="${date}" data-scan="${scan ? scan.id : ''}">
+  dialog.innerHTML = `<form id="scan-form" data-employee="${employeeId}" data-date="${date}" data-scan="${scan ? scan.id : ''}">
     <h2>${esc(employee.name)}</h2><p class="sub">${prettyDate(date, true)}</p>
-    <label>Scan<select name="slot">${SLOT_NAMES.map((n, i) => `<option value="${i + 1}" ${i === slotIndex ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-    <label>Time<input type="time" name="time" value="${minutesToInput(value)}" required></label>
+    <label>Time<input type="time" name="time" value="${minutesToInput(minutes)}" required></label>
     <label>Reason (optional)<input name="reason" maxlength="120" autocomplete="off"></label>
-    ${scan ? `<p class="sub">Machine time is kept in the change history.</p>` : ''}
+    <p class="sub">IN and OUT follow the order of the day's scans.${scan ? ' The machine time is kept in the change history.' : ''}</p>
     <div class="dialog-btns">
       ${scan ? '<button class="btn danger" type="button" data-action="remove-scan">Remove</button>' : ''}
       <span class="spacer"></span>
@@ -528,9 +524,18 @@ function exportRows(from, to) {
     .sort((a, b) => a.date.localeCompare(b.date) || a.employee.name.localeCompare(b.employee.name));
 }
 
-function slotText(slot) {
-  if (slot.scan) return formatMinutes(slot.minutes);
-  return slot.missing ? 'Missing' : '';
+function cellText(cell) {
+  if (!cell) return '';
+  if (cell.scan) return formatMinutes(cell.minutes);
+  return cell.missing ? 'Missing' : '';
+}
+
+// Enough IN/OUT columns for the busiest day in the download
+function exportColumns(rows) {
+  const pairs = Math.max(1, ...rows.map(d => Math.ceil(d.cells.length / 2)));
+  const labels = [];
+  for (let i = 1; i <= pairs; i++) labels.push(`${ordinal(i)} IN`, `${ordinal(i)} OUT`);
+  return labels;
 }
 
 function rememberDownload(to) {
@@ -547,13 +552,12 @@ function exportExcel(from, to) {
     document.head.appendChild(s);
   });
   load.then(() => {
-    const rows = exportRows(from, to).map(d => ({
+    const days = exportRows(from, to);
+    const columns = exportColumns(days);
+    const rows = days.map(d => ({
       Date: d.date,
       Employee: d.employee.name,
-      'Morning IN': slotText(d.slots[0]),
-      'Lunch OUT': slotText(d.slots[1]),
-      'Lunch IN': slotText(d.slots[2]),
-      'Evening OUT': slotText(d.slots[3]),
+      ...Object.fromEntries(columns.map((label, i) => [label, cellText(d.cells[i])])),
       'Worked (min)': d.worked,
       'Late (min)': d.lateTotal,
       'Early (min)': d.earlyTotal,
@@ -569,10 +573,11 @@ function exportExcel(from, to) {
 
 function exportPdf(from, to) {
   const rows = exportRows(from, to);
+  const columns = exportColumns(rows);
   document.getElementById('print-area').innerHTML = `<h2>Attendance ${prettyDate(from, true)} to ${prettyDate(to, true)}</h2>
-    <table><thead><tr><th>Date</th><th>Employee</th><th>Morning IN</th><th>Lunch OUT</th><th>Lunch IN</th><th>Evening OUT</th><th>Worked</th><th>Late</th><th>Early</th><th>Overtime</th></tr></thead>
+    <table><thead><tr><th>Date</th><th>Employee</th>${columns.map(c => `<th>${c}</th>`).join('')}<th>Worked</th><th>Late</th><th>Early</th><th>Overtime</th></tr></thead>
     <tbody>${rows.map(d => `<tr><td>${d.date}</td><td>${esc(d.employee.name)}</td>
-      ${d.slots.map(s => `<td class="${s.colour || ''}">${slotText(s)}</td>`).join('')}
+      ${columns.map((c, i) => `<td class="${d.cells[i]?.colour || ''}">${cellText(d.cells[i])}</td>`).join('')}
       <td>${formatDuration(d.worked)}</td><td>${d.lateTotal}m</td><td>${d.earlyTotal}m</td><td>${formatDuration(d.overtime)}</td></tr>`).join('')}</tbody></table>`;
   rememberDownload(to);
   window.print();
@@ -616,7 +621,7 @@ document.addEventListener('click', async (event) => {
   const { action } = el.dataset;
   const id = Number(el.dataset.id);
 
-  if (action === 'edit-slot') openSlotEditor(Number(el.dataset.employee), el.dataset.date, Number(el.dataset.slot));
+  if (action === 'edit-scan') openScanEditor(Number(el.dataset.employee), el.dataset.date, Number(el.dataset.scan) || null, Number(el.dataset.minutes));
   if (action === 'close-dialog') dialog.close();
   if (action === 'status-filter') { filters.status = el.dataset.status; render(); }
   if (action === 'cal-move') { calendarMonth = el.dataset.month; render(); }
@@ -691,16 +696,15 @@ document.addEventListener('submit', async (event) => {
     }, applyAll ? 'Saved for everyone' : 'Saved');
   }
 
-  if (form.id === 'slot-form') {
+  if (form.id === 'scan-form') {
     const f = new FormData(form);
     const [h, m] = f.get('time').split(':').map(Number);
     const iso = istToIso(form.dataset.date, h * 60 + m);
-    const slot = Number(f.get('slot'));
     const reason = f.get('reason').trim() || null;
     const employeeId = Number(form.dataset.employee);
     const scan = data.scans.find(s => s.id === Number(form.dataset.scan));
     dialog.close();
-    await act(() => (scan ? api.changeScan(scan, iso, slot, reason) : api.addScan(employeeId, iso, slot, reason)), 'Saved');
+    await act(() => (scan ? api.changeScan(scan, iso, reason) : api.addScan(employeeId, iso, reason)), 'Saved');
   }
 
   if (form.id === 'delete-form') {

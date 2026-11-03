@@ -3,7 +3,7 @@
 <title>Attendance rules tests</title>
 <pre id="out">Running...</pre>
 <script type="module">
-import { buildDay, assignSlots, shiftFor, istToIso, istMinutes, istDate, clearsOn, clearingWindow, monthTotals, formatMinutes } from '../docs/js/rules.js';
+import { buildDay, shiftFor, istToIso, istMinutes, istDate, clearsOn, clearingWindow, monthTotals, formatMinutes, ordinal } from '../docs/js/rules.js';
 
 const results = [];
 function eq(name, actual, expected) {
@@ -12,74 +12,70 @@ function eq(name, actual, expected) {
 }
 
 const D = '2026-11-02';
-const T = (h, m, s = 0) => istToIso(D, h * 60 + m) .replace(':00.000Z', `:${String(s).padStart(2, '0')}.000Z`);
-const scan = (h, m, extra = {}) => ({ scanned_at: T(h, m), ...extra });
+const T = (h, m, s = 0) => istToIso(D, h * 60 + m).replace(':00.000Z', `:${String(s).padStart(2, '0')}.000Z`);
+const scans = (...times) => times.map(([h, m]) => ({ scanned_at: T(h, m) }));
 const std = { effective_from: '2026-01-01', morning_start: '09:00', morning_end: '14:00', evening_start: '15:00', evening_end: '20:00', late_buffer: 5, early_buffer: 10 };
 const later = { date: '2026-11-03', minutes: 600 };
-const day = (scans, shifts = [std], now = later, date = D) => buildDay(date, scans, shifts, now);
-const full = (a, b, c, d) => [scan(...a), scan(...b), scan(...c), scan(...d)];
-const normal = full([9, 0], [14, 0], [15, 0], [20, 0]);
+const day = (list, shifts = [std], now = later) => buildDay(D, list, shifts, now);
+const normal = scans([9, 0], [14, 0], [15, 0], [20, 0]);
 
-// Late buffer
-eq('9:05 is on time', day(full([9, 5], [14, 0], [15, 0], [20, 0])).slots[0].late, 0);
-eq('9:06 is 1 minute late', day(full([9, 6], [14, 0], [15, 0], [20, 0])).slots[0].late, 1);
-eq('9:06 is coloured late', day(full([9, 6], [14, 0], [15, 0], [20, 0])).slots[0].colour, 'late');
-eq('9:05 has no colour', day(full([9, 5], [14, 0], [15, 0], [20, 0])).slots[0].colour, null);
-eq('seconds ignored: 9:05:40 is on time', day([{ scanned_at: T(9, 5, 40) }]).slots[0].late, 0);
+// Order and labels
+eq('labels follow the order', day(scans([9, 0], [11, 0], [11, 30], [14, 0], [15, 0], [20, 0])).cells.map(c => c.label),
+  ['1st IN', '1st OUT', '2nd IN', '2nd OUT', '3rd IN', '3rd OUT']);
+eq('scans sorted by time', day(scans([20, 0], [9, 0])).cells.map(c => c.label + ' ' + formatMinutes(c.minutes)), ['1st IN 9:00 am', '1st OUT 8:00 pm']);
+eq('ordinals', [1, 2, 3, 4, 11, 21, 22].map(ordinal), ['1st', '2nd', '3rd', '4th', '11th', '21st', '22nd']);
 
-// Early buffer
-eq('1:50 is on time', day(full([9, 0], [13, 50], [15, 0], [20, 0])).slots[1].early, 0);
-eq('1:49 is 1 minute early', day(full([9, 0], [13, 49], [15, 0], [20, 0])).slots[1].early, 1);
-eq('7:49pm is 1 minute early', day(full([9, 0], [14, 0], [15, 0], [19, 49])).slots[3].early, 1);
-eq('7:49pm is coloured early', day(full([9, 0], [14, 0], [15, 0], [19, 49])).slots[3].colour, 'early');
+// Late: first IN only
+eq('9:05 is on time', day(scans([9, 5], [20, 0])).lateTotal, 0);
+eq('9:06 is 1 minute late', day(scans([9, 6], [20, 0])).lateTotal, 1);
+eq('9:06 is coloured late', day(scans([9, 6], [20, 0])).cells[0].colour, 'late');
+eq('seconds ignored: 9:05:40 is on time', day([{ scanned_at: T(9, 5, 40) }]).lateTotal, 0);
+eq('later INs are never late', day(scans([9, 0], [14, 0], [15, 30], [20, 0])).lateTotal, 0);
+eq('later INs have no colour', day(scans([9, 0], [14, 0], [15, 30], [20, 0])).cells[2].colour, null);
 
-// Lunch
-eq('3:05 lunch return is on time', day(full([9, 0], [14, 0], [15, 5], [20, 0])).slots[2].late, 0);
-eq('3:06 lunch return is 1 minute late', day(full([9, 0], [14, 0], [15, 6], [20, 0])).slots[2].late, 1);
-eq('late lunch return has no colour', day(full([9, 0], [14, 0], [15, 6], [20, 0])).slots[2].colour, null);
-eq('early lunch out has no colour', day(full([9, 0], [13, 0], [15, 0], [20, 0])).slots[1].colour, null);
-eq('lunch lateness counts in the total', day(full([9, 0], [14, 0], [15, 6], [20, 0])).lateTotal, 1);
+// Early: last OUT only
+eq('7:50pm is on time', day(scans([9, 0], [19, 50])).earlyTotal, 0);
+eq('7:49pm is 1 minute early', day(scans([9, 0], [19, 49])).earlyTotal, 1);
+eq('7:49pm is coloured early', day(scans([9, 0], [19, 49])).cells[1].colour, 'early');
+eq('a break OUT is never early', day(scans([9, 0], [13, 0], [14, 0], [20, 0])).earlyTotal, 0);
+eq('early arrival does not cancel early leave', day(scans([8, 40], [19, 40])).earlyTotal, 10);
 
-// Overtime and worked hours
-eq('8:45pm is 45 minutes overtime', day(full([9, 0], [14, 0], [15, 0], [20, 45])).overtime, 45);
+// Overtime and worked time
+eq('8:45pm is 45 minutes overtime', day(scans([9, 0], [20, 45])).overtime, 45);
 eq('8:00pm is no overtime', day(normal).overtime, 0);
-eq('worked hours on a normal day', day(normal).worked, 600);
-eq('early arrival does not cancel early leave', day(full([8, 40], [14, 0], [15, 0], [19, 40])).earlyTotal, 10);
+eq('worked time adds up each IN to OUT', day(normal).worked, 600);
+eq('three pairs add up', day(scans([9, 0], [11, 0], [11, 30], [14, 0], [15, 0], [20, 0])).worked, 120 + 150 + 300);
 
 // Per-person hours
 const custom = { ...std, morning_start: '10:00', late_buffer: 15 };
-eq('custom start and buffer: 10:15 on time', day(full([10, 15], [14, 0], [15, 0], [20, 0]), [custom]).slots[0].late, 0);
-eq('custom start and buffer: 10:16 late', day(full([10, 16], [14, 0], [15, 0], [20, 0]), [custom]).slots[0].late, 1);
+eq('custom start and buffer: 10:15 on time', day(scans([10, 15], [20, 0]), [custom]).lateTotal, 0);
+eq('custom start and buffer: 10:16 late', day(scans([10, 16], [20, 0]), [custom]).lateTotal, 1);
 const edited = { ...std, effective_from: '2026-11-03', morning_start: '11:00' };
 eq('past day keeps old hours', shiftFor([std, edited], D).morning_start, '09:00');
 eq('new hours apply from their date', shiftFor([std, edited], '2026-11-03').morning_start, '11:00');
 
-// Slots and missing scans
-const noLunchOut = day([scan(9, 0), scan(15, 2), scan(20, 0)]);
-eq('forgot Lunch OUT: 3:02 goes to Lunch IN', noLunchOut.slots[2].minutes, 15 * 60 + 2);
-eq('forgot Lunch OUT: it shows as missing', noLunchOut.slots[1].missing, true);
-eq('forgot Lunch OUT: day is flagged', noLunchOut.hasMissing, true);
-eq('complete day is not flagged', day(normal).hasMissing, false);
-eq('fifth scan is kept as an extra', day([...normal, scan(20, 30)]).extras.length, 1);
-eq('manual slot choice wins', assignSlots([scan(15, 2, { slot_override: 2 })], std).slots[1] !== null, true);
-const empty = day([]);
-eq('no scans is not missing', [empty.hasScans, empty.hasMissing], [false, false]);
+// Missing OUT
+const forgot = day(scans([9, 0], [14, 0], [15, 0]));
+eq('past day with no final OUT is missing', forgot.hasMissing, true);
+eq('missing OUT shows as a cell', [forgot.cells[3].label, forgot.cells[3].missing], ['2nd OUT', true]);
+eq('complete day is not missing', day(normal).hasMissing, false);
+eq('no scans is not missing', [day([]).hasScans, day([]).hasMissing], [false, false]);
 
 // Today
 const noon = { date: D, minutes: 12 * 60 };
-const today = day([scan(9, 0)], [std], noon);
-eq('today: Lunch OUT not missing yet', today.slots[1].missing, false);
-eq('today: person counts as in', today.isIn, true);
-eq('today: Evening OUT never missing', day(full([9, 0], [14, 0], [15, 0], [20, 0]).slice(0, 3), [std], { date: D, minutes: 23 * 60 }).slots[3].missing, false);
+eq('today: open IN means at work', day(scans([9, 0]), [std], noon).isIn, true);
+eq('today: open IN is not missing', day(scans([9, 0]), [std], noon).hasMissing, false);
+eq('today: OUT means not at work', day(scans([9, 0], [11, 0]), [std], noon).isIn, false);
+eq('today: OUT before finish time is not early yet', day(scans([9, 0], [11, 0]), [std], noon).earlyTotal, 0);
+eq('today: after finish time an early OUT counts', day(scans([9, 0], [18, 0]), [std], { date: D, minutes: 20 * 60 }).earlyTotal, 110);
 eq('today: not arrived after buffer', day([], [std], { date: D, minutes: 9 * 60 + 6 }).notArrived, true);
 eq('today: not late yet inside buffer', day([], [std], { date: D, minutes: 9 * 60 + 5 }).notArrived, false);
-eq('today: left for lunch counts as out', day([scan(9, 0), scan(14, 0)], [std], { date: D, minutes: 14 * 60 + 5 }).isIn, false);
 
 // Time zone and clearing
 eq('India time of a UTC scan', [istDate('2026-11-01T20:00:00Z'), istMinutes('2026-11-01T20:00:00Z')], ['2026-11-02', 90]);
 eq('a day clears 31 days later', clearsOn('2026-10-01'), '2026-11-01');
 eq('reminder window', clearingWindow(D), { from: '2026-10-03', to: '2026-10-10' });
-eq('month totals', monthTotals([day(full([9, 6], [14, 0], [15, 0], [20, 45])), day([])]).overtime, 45);
+eq('month totals', monthTotals([day(scans([9, 6], [20, 45])), day([])]).overtime, 45);
 eq('time format', [formatMinutes(9 * 60 + 6), formatMinutes(12 * 60), formatMinutes(0)], ['9:06 am', '12:00 pm', '12:00 am']);
 
 const failed = results.filter(r => r.startsWith('FAIL')).length;

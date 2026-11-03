@@ -35,7 +35,8 @@ for (let d = 28; d >= 0; d--) {
       15 * 60 - 5 + rand(9) + (rand(6) === 0 ? 8 : 0),
       20 * 60 - 8 + rand(10) + (rand(5) === 0 ? 20 + rand(40) : 0) - (rand(7) === 0 ? 30 : 0),
     ];
-    const forgot = rand(14) === 0 ? 1 + rand(2) : -1;
+    if (rand(6) === 0) times.splice(1, 0, 11 * 60 + rand(20), 11 * 60 + 25 + rand(15)); // a short break
+    const forgot = rand(14) === 0 ? times.length - 1 : -1;
     times.forEach((m, i) => {
       if (i === forgot) return;
       if (d === 0 && m > nowMinutes) return;
@@ -87,15 +88,15 @@ export const demoApi = {
     Object.assign(data.settings, values);
   },
 
-  async addScan(employeeId, iso, slot, reason) {
-    data.scans.push({ id: nextId++, employee_id: employeeId, scanned_at: iso, source: 'manual', slot_override: slot });
+  async addScan(employeeId, iso, reason) {
+    data.scans.push({ id: nextId++, employee_id: employeeId, scanned_at: iso, source: 'manual', slot_override: null });
     data.edits.push({ id: nextId++, employee_id: employeeId, action: 'added', new_at: iso, reason, edited_at: new Date().toISOString() });
   },
-  async changeScan(scan, iso, slot, reason) {
+  async changeScan(scan, iso, reason) {
     const row = data.scans.find(s => s.id === scan.id);
     data.edits.push({ id: nextId++, employee_id: scan.employee_id, action: 'changed', old_at: row.scanned_at, new_at: iso, reason, edited_at: new Date().toISOString() });
     row.scanned_at = iso;
-    row.slot_override = slot;
+    row.slot_override = null;
   },
   async removeScan(scan, reason) {
     data.scans = data.scans.filter(s => s.id !== scan.id);

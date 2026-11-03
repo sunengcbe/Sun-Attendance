@@ -166,6 +166,9 @@ label.check input { width: 20px; min-height: 20px; margin: 0; }
 .slot .t.late { color: var(--late); font-weight: 700; }
 .slot .t.early { color: var(--early); font-weight: 700; }
 .slot .t.none { color: var(--muted); font-weight: 400; }
+.slot.in small { color: var(--primary); font-weight: 600; }
+.slot.add { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.slot.add .t { font-size: 18px; line-height: 1.1; }
 .slot.late { background: var(--late-soft); }
 .slot.early { background: var(--early-soft); }
 .slot.missing { background: transparent; box-shadow: inset 0 0 0 1px var(--amber); }

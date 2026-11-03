@@ -1,7 +1,5 @@
 // Attendance rules. No screen or database code here, so tests/rules.test.html can check them.
 
-export const SLOT_NAMES = ['Morning IN', 'Lunch OUT', 'Lunch IN', 'Evening OUT'];
-
 const IST_MS = 5.5 * 60 * 60 * 1000;
 
 export function istDate(value) {
@@ -41,6 +39,11 @@ export function formatDuration(minutes) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+export function ordinal(n) {
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+  return n + suffix;
+}
+
 // The hours that applied on a given date. An edit only counts from its own date onward.
 export function shiftFor(shifts, date) {
   const sorted = [...shifts].sort((a, b) => a.effective_from.localeCompare(b.effective_from));
@@ -51,95 +54,66 @@ export function shiftFor(shifts, date) {
   return chosen;
 }
 
-function scheduledTimes(shift) {
-  return [shift.morning_start, shift.morning_end, shift.evening_start, shift.evening_end].map(toMinutes);
-}
-
-// Puts each scan in the nearest remaining slot by time, so a forgotten scan
-// shows as missing instead of shifting everything after it.
-export function assignSlots(scans, shift) {
-  const sched = scheduledTimes(shift);
-  const sorted = [...scans].sort((a, b) => new Date(a.scanned_at) - new Date(b.scanned_at));
-  const reserved = new Set(sorted.filter(s => s.slot_override).map(s => s.slot_override - 1));
-  const slots = [null, null, null, null];
-  const extras = [];
-  let last = -1;
-
-  for (const scan of sorted) {
-    if (scan.slot_override && !slots[scan.slot_override - 1]) {
-      slots[scan.slot_override - 1] = scan;
-      last = Math.max(last, scan.slot_override - 1);
-      continue;
-    }
-    const minutes = istMinutes(scan.scanned_at);
-    let best = -1;
-    for (let i = last + 1; i < 4; i++) {
-      if (slots[i] || reserved.has(i)) continue;
-      if (best < 0 || Math.abs(sched[i] - minutes) < Math.abs(sched[best] - minutes)) best = i;
-    }
-    if (best < 0) {
-      extras.push(scan);
-    } else {
-      slots[best] = scan;
-      last = best;
-    }
-  }
-  return { slots, extras };
-}
-
-function slotIsMissing(index, slots, sched, shift, date, now) {
-  if (slots[index]) return false;
-  if (date < now.date) return true;
-  if (slots.slice(index + 1).some(Boolean)) return true;
-  if (index === 0) return now.minutes > sched[0] + shift.late_buffer;
-  if (index === 1) return now.minutes >= sched[2];
-  if (index === 2) return now.minutes > sched[2] + shift.late_buffer;
-  return false; // Evening OUT can still happen today, however late
-}
-
+// Scans alternate IN, OUT, IN, OUT in time order: 1st IN, 1st OUT, 2nd IN, 2nd OUT...
+// Only the day's first IN can be late, and only its last OUT can be early or overtime.
 // now is { date, minutes } in India time.
 export function buildDay(date, scans, shifts, now) {
   const shift = shiftFor(shifts, date);
-  const sched = scheduledTimes(shift);
-  const { slots, extras } = assignSlots(scans, shift);
-  const hasScans = scans.length > 0;
+  const start = toMinutes(shift.morning_start);
+  const end = toMinutes(shift.evening_end);
+  const sorted = [...scans].sort((a, b) => new Date(a.scanned_at) - new Date(b.scanned_at));
+  const isToday = date === now.date;
+  const outPending = sorted.length % 2 === 1;
 
-  let lateTotal = 0;
-  let earlyTotal = 0;
+  const cells = sorted.map((scan, i) => ({
+    scan,
+    kind: i % 2 === 0 ? 'in' : 'out',
+    label: `${ordinal(Math.floor(i / 2) + 1)} ${i % 2 === 0 ? 'IN' : 'OUT'}`,
+    minutes: istMinutes(scan.scanned_at),
+    late: 0, early: 0, colour: null, missing: false,
+  }));
+
+  let late = 0;
+  let early = 0;
   let overtime = 0;
 
-  const views = slots.map((scan, i) => {
-    const view = {
-      index: i, name: SLOT_NAMES[i], scheduled: sched[i], scan, minutes: null,
-      late: 0, early: 0, colour: null,
-      missing: hasScans && slotIsMissing(i, slots, sched, shift, date, now),
-    };
-    if (!scan) return view;
+  if (cells.length) {
+    const first = cells[0];
+    first.late = late = Math.max(0, first.minutes - (start + shift.late_buffer));
+    if (late) first.colour = 'late';
+  }
 
-    const minutes = istMinutes(scan.scanned_at);
-    view.minutes = minutes;
-    if (i === 0 || i === 2) view.late = Math.max(0, minutes - (sched[i] + shift.late_buffer));
-    if (i === 1 || i === 3) view.early = Math.max(0, (sched[i] - shift.early_buffer) - minutes);
-    if (i === 3) overtime = Math.max(0, minutes - sched[3]);
-    lateTotal += view.late;
-    earlyTotal += view.early;
+  // Until the day's finishing time has passed, an OUT could just be a break
+  const dayOver = !isToday || now.minutes >= end;
+  if (cells.length && !outPending) {
+    const last = cells[cells.length - 1];
+    overtime = Math.max(0, last.minutes - end);
+    if (dayOver) {
+      last.early = early = Math.max(0, (end - shift.early_buffer) - last.minutes);
+      if (early) last.colour = 'early';
+    }
+  }
 
-    // Lunch scans never get a colour
-    if (i === 0 && view.late) view.colour = 'late';
-    if (i === 3 && view.early) view.colour = 'early';
-    return view;
-  });
+  // An IN with no OUT after it: still at work today, a forgotten scan on a past day
+  const missing = outPending && !isToday;
+  if (outPending) {
+    cells.push({
+      scan: null, kind: 'out', label: `${ordinal(Math.ceil(sorted.length / 2))} OUT`,
+      minutes: null, late: 0, early: 0, colour: null, missing,
+    });
+  }
 
   let worked = 0;
-  if (slots[0] && slots[1]) worked += Math.max(0, views[1].minutes - views[0].minutes);
-  if (slots[2] && slots[3]) worked += Math.max(0, views[3].minutes - views[2].minutes);
+  for (let i = 0; i + 1 < sorted.length; i += 2) {
+    worked += Math.max(0, cells[i + 1].minutes - cells[i].minutes);
+  }
 
   return {
-    date, shift, slots: views, extras, hasScans,
-    lateTotal, earlyTotal, overtime, worked,
-    hasMissing: views.some(v => v.missing),
-    notArrived: !hasScans && date === now.date && now.minutes > sched[0] + shift.late_buffer,
-    isIn: !!(views.filter(v => v.scan).pop()?.index % 2 === 0 && hasScans),
+    date, shift, cells, hasScans: sorted.length > 0,
+    lateTotal: late, earlyTotal: early, overtime, worked,
+    hasMissing: missing,
+    notArrived: !sorted.length && isToday && now.minutes > start + shift.late_buffer,
+    isIn: isToday && outPending,
   };
 }
 

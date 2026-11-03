@@ -90,12 +90,12 @@ export const api = {
     check(await db.from('settings').update(values).eq('id', 1));
   },
 
-  async addScan(employeeId, iso, slot, reason) {
-    check(await db.from('scans').insert({ employee_id: employeeId, scanned_at: iso, source: 'manual', slot_override: slot }));
+  async addScan(employeeId, iso, reason) {
+    check(await db.from('scans').insert({ employee_id: employeeId, scanned_at: iso, source: 'manual', slot_override: null }));
     check(await db.from('scan_edits').insert({ employee_id: employeeId, action: 'added', new_at: iso, reason }));
   },
-  async changeScan(scan, iso, slot, reason) {
-    check(await db.from('scans').update({ scanned_at: iso, slot_override: slot }).eq('id', scan.id));
+  async changeScan(scan, iso, reason) {
+    check(await db.from('scans').update({ scanned_at: iso, slot_override: null }).eq('id', scan.id));
     check(await db.from('scan_edits').insert({ employee_id: scan.employee_id, action: 'changed', old_at: scan.scanned_at, new_at: iso, reason }));
   },
   async removeScan(scan, reason) {
