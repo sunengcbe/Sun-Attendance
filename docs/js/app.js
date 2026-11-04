@@ -672,6 +672,7 @@ document.addEventListener('submit', async (event) => {
       await api.signIn(f.get('email'), f.get('password'));
       await reload();
       render();
+      goLive();
     } catch (e) {
       document.getElementById('login-error').textContent = e.message;
     }
@@ -759,17 +760,34 @@ window.addEventListener('hashchange', () => {
 });
 
 // Keep the numbers fresh, without disturbing a form you are typing in
-setInterval(async () => {
-  if (!data || dialog.open || document.hidden) return;
-  const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'SELECT') return;
-  const { page } = route();
-  if (page !== 'today' && page !== 'attendance') return;
+let refreshing = false;
+let refreshAgain = false;
+
+async function refresh() {
+  if (!data) return;
+  if (refreshing) { refreshAgain = true; return; }
+  refreshing = true;
   try {
     await reload();
-    render();
+    const tag = document.activeElement?.tagName;
+    const busy = dialog.open || tag === 'INPUT' || tag === 'SELECT';
+    const { page } = route();
+    if (!busy && page !== 'add') render();
   } catch { /* try again next time */ }
-}, 30000);
+  refreshing = false;
+  if (refreshAgain) { refreshAgain = false; refresh(); }
+}
+
+// New scans arrive within seconds. The timer is a backup if the live connection drops.
+let subscribed = false;
+function goLive() {
+  if (subscribed) return;
+  subscribed = true;
+  api.subscribe(() => refresh());
+}
+
+setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
 // --- Start ---
 async function start() {
@@ -782,6 +800,7 @@ async function start() {
     if (!signedIn) { viewLogin(); return; }
     await reload();
     render();
+    goLive();
   } catch (e) {
     viewLogin(e.message);
   }

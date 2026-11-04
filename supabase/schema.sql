@@ -272,6 +272,9 @@ grant execute on function retry_enroll(bigint) to authenticated;
 grant execute on function soft_delete_employee(bigint) to authenticated;
 grant execute on function restore_employee(bigint) to authenticated;
 
+-- Live updates: the app hears about new scans within seconds.
+alter publication supabase_realtime add table scans, commands, employees;
+
 -- Tables have no access for the public key, only through the functions above.
 revoke all on all tables in schema public from anon;
 grant select, insert, update, delete on all tables in schema public to authenticated;

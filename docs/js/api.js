@@ -47,6 +47,15 @@ export const api = {
     await db.rpc('run_cleanup');
   },
 
+  // Calls onChange as soon as a scan, job or employee changes in the database
+  subscribe(onChange) {
+    const channel = db.channel('attendance-changes');
+    for (const table of ['scans', 'commands', 'employees']) {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, onChange);
+    }
+    channel.subscribe();
+  },
+
   async signOut() {
     await db.auth.signOut();
   },

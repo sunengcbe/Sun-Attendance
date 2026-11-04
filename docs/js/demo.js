@@ -51,6 +51,7 @@ export const demoApi = {
   demo: true,
   async init() { return true; },
   async signIn() {},
+  subscribe() {},
   async signOut() {},
   async changePassword() {},
   async loadAll() {
